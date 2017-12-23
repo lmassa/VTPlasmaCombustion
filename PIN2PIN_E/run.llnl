@@ -1,0 +1,27 @@
+#!/bin/bash
+##### Example job control script using Moab syntax
+#MSUB -l partition=quartz
+#MSUB -l nodes=2
+#MSUB -q pbatch
+#MSUB -l walltime=4:00:00
+####MSUB -A phys
+####MSUB -m be
+#MSUB -j  oe
+#MSUB -V
+#MSUB -o LM_W3D.%j
+
+##### These are shell commands
+# Display job information for possible diagnostic use
+date
+##echo "Job id = $SLURM_JOBID"
+##hostname
+##sinfo
+##squeue -j $SLURM_JOBID
+export F_UFMTENDIAN=big
+# Run info
+cd /p/lscratchh/massa5/ChomboVT/AIAA18/PIN2PIN
+module load hdf5-parallel/1.8.18
+export LD_LIBRARY_PATH=/g/g17/massa5/SUNDIALS/sundials-3.0.0/instdir/lib:$LD_LIBRARY_PATH
+srun -n72 /p/lscratchh/massa5/ChomboVT/AIAA18/PIN2PIN/plasma2d.Linux.64.mpicxx.mpif90.OPTHIGH.MPI.PETSC.ex   plasma.inputs
+echo 'Done'
+date

@@ -1,0 +1,529 @@
+C      _______              __
+C     / ___/ /  ___  __ _  / /  ___
+C    / /__/ _ \/ _ \/  V \/ _ \/ _ \
+C    \___/_//_/\___/_/_/_/_.__/\___/
+C    Please refer to Copyright.txt, in Chombo''s root directory.
+
+#include "CONSTANTS.H"
+#include "EBLGIntegrator.H"
+cccccccccccccccccccc
+cccccccccccccccccccc
+        subroutine getpostshockvel(
+     &    chf_real[aupostshockvel])
+#include "EBPin2PinCommon.fh"
+#include "EBEOSCommon.fh"
+
+        aupostshockvel = abs(postshockvel)
+
+
+        return
+        end
+
+cccccccccccccccccccccccccccccc
+cccccccccccccccccccccccccccccc
+      subroutine getshocklocx(
+     $     chf_const_real[aushockloc],
+     $     chf_const_real[time])
+#include "EBPin2PinCommon.fh"
+#include "EBEOSCommon.fh"
+
+      real_t soundspeed
+
+      soundspeed = sqrt(gamma*preshockpress/preshockdense)
+
+      aushockloc = shockcenter + shockms*soundspeed*time
+
+      return
+      end
+
+      subroutine setpin2pin(
+     &    chf_const_real[augamma],
+     &    chf_const_real[aums],
+     &    chf_const_real[aucenter],
+     &    chf_const_real[aupreshockpress],
+     &    chf_const_real[aupreshockdense],
+     &    chf_const_int[aushocknorm],
+     &    chf_const_int[aushockback])
+
+#include "EBPin2PinCommon.fh"
+#include "EBEOSCommon.fh"
+
+        real_t ww, pdiff
+
+        gamma = augamma
+        shockms = aums
+        idomodianoprob = 0
+        shockcenter = aucenter
+        shocknorm   = aushocknorm
+
+c     largely pirated from RampF.ChF
+        preshockpress = one
+        preshockdense  = gamma
+
+c Luca''s changes
+        postshockpress=preshockpress
+        postshockdense=preshockdense
+        postshockvel = shockms
+        shockbackward = (aushockback.eq.1)
+
+        if(.false.) then
+          ww = shockms*preshockdense
+          
+          postshockpress =preshockpress* ((shockms**2 - one)*(two*gamma)
+     $         /(gamma + one) + one)
+          
+          pdiff = postshockpress - preshockpress
+          postshockdense = one/(one/preshockdense - pdiff/ww**2)
+          
+          shockbackward = (aushockback.eq.1)
+          postshockvel = pdiff/ww
+          if(shockbackward) then
+            postshockvel = -postshockvel
+          endif
+        endif
+
+c     set levels of smallnitude
+        smallr = small*preshockdense
+        smallu = small*postshockvel
+        smallp = small*preshockdense*half*postshockvel*postshockvel
+
+        return
+        end
+cccccccccccccccccccc
+cccccccccccccccccccc
+
+        subroutine pin2pininit(
+     &    chf_fra[u],
+     &    chf_const_real[dx],
+     &    chf_box[box])
+
+        integer chf_ddecl[i;j;k]
+        integer iv(0:CH_SPACEDIM-1)
+        real_t density, energy, momentum(0:CH_SPACEDIM-1)
+
+        chf_multido[box;i;j;k]
+
+        chf_dterm[
+        iv(0) = i;
+        iv(1) = j;
+        iv(2) = k]
+
+        call pointpin2pininit(density, momentum, energy, iv, dx)
+
+        chf_dterm[
+        u(chf_ix[i;j;k],CMOMX) = momentum(0);
+        u(chf_ix[i;j;k],CMOMY) = momentum(1);
+        u(chf_ix[i;j;k],CMOMZ) = momentum(2)]
+
+        u(chf_ix[i;j;k],CRHO) = density
+        u(chf_ix[i;j;k],CENG) = energy
+
+        chf_enddo
+
+        return
+        end
+ccccccccccccccccccccc
+ccccccccccccccccccccc
+        subroutine pointpin2pininit(
+     &    chf_real[density],
+     &    chf_realvect[momentum],
+     &    chf_real[energy],
+     &    chf_const_intvect[iv],
+     &    chf_const_real[dx])
+
+        real_t xval, ke, ri, preshockvel
+        integer idir
+        integer tshockn
+        real_t tpostshockvel, tpreshockpress, tpostshockpress
+        real_t tpreshockdense, tpostshockdense, tshockms, tshockcenter
+#include "EBPin2PinCommon.fh"
+#include "EBEOSCommon.fh"
+
+c     debug
+        tshockn = shocknorm
+        tpostshockvel = postshockvel
+        tpostshockpress=postshockpress
+        tpreshockpress=preshockpress
+        tpostshockdense=postshockdense
+        tpreshockdense=preshockdense
+        tshockms = shockms
+        tshockcenter = shockcenter
+c     end debug
+        ri = iv(shocknorm)
+
+        xval = (ri + 0.5)*dx
+
+c     momentum only nonzero in one component
+c     fixed in postschock stuff
+        do idir = 0, CH_SPACEDIM-1
+           momentum(idir) = zero
+        enddo
+
+        preshockvel = postshockvel/2d0
+        if(((.not.shockbackward).and.(xval .gt. shockcenter)).or.
+     &       ((     shockbackward).and.(xval .le. shockcenter))) then
+c     on pre-shock side
+           density = preshockdense
+c     momentum only nonzero in one component
+           momentum(shocknorm) = density*preshockvel
+           ke = half*density*preshockvel*preshockvel
+           energy  = preshockpress/(gamma-one) + ke
+        else
+c     on post-shock side
+           density = postshockdense
+c     momentum only nonzero in one component
+           momentum(shocknorm) = density*postshockvel
+           ke = half*density*postshockvel*postshockvel
+           energy  = postshockpress/(gamma-one) + ke
+        endif
+
+        return
+      end
+
+       
+cccccccccccccccccccc
+
+        subroutine blinit(
+     &     chf_fra1[u],
+     &     chf_const_int[ivar],
+     &     chf_const_real[dx],
+     &     chf_const_real[x0],
+     &     chf_const_real[ReRoot2],
+     &     chf_const_vr[y],
+     &     chf_const_vr[xdata],
+     &     chf_const_vr[ydata],
+     &     chf_const_vr[B],
+     &     chf_const_vr[C],
+     &     chf_const_vr[D],
+     &     chf_const_vr[E],
+     &     chf_const_vr[F],
+     &     chf_box[box])
+
+        integer chf_ddecl[i;j;k]
+        real_t eta,x
+
+        chf_multido[box;i;j;k]
+!note x0 is <0
+        x = (i + 0.5d0)*dx - x0;
+        !!lucacancel
+        !!x = - x0
+
+        eta = y(j)*ReRoot2/sqrt(x); !y0 was already subtracted
+
+        call spline5(u(chf_ix[i;j;k]), eta, xdata,ixdatahi0,ydata,
+     $       iydatahi0, B,ibhi0, C,ichi0, D,idhi0, E,iehi0 ,F,ifhi0)
+
+        if(ivar == 2) then
+           u(chf_ix[i;j;k]) = u(chf_ix[i;j;k])/ReRoot2/sqrt(x)
+         endif
+
+        chf_enddo
+
+        return
+        end
+ccccccccccccccccccccc
+      subroutine spline5(chf_real[yeval],chf_const_real[xeval],
+     $     chf_const_vr[xdata], chf_const_vr[ydata], chf_const_vr[b],
+     $     chf_const_vr[c], chf_const_vr[d],chf_const_vr[e], chf_const_vr[f])
+
+      real_t   minx,maxx,gsp(5),alp(5)
+      integer j,inc,jspline,is, NPT
+
+
+      NPT = chf_ubound[xdata]-1
+
+      minx= minval(xdata);
+      maxx = maxval(xdata);
+      j=0;
+      inc = 4**(max(floor(log(dble(NPT))/log(4d0))-1,0));
+      if (xeval  < minx) then
+         jspline=  j;
+         yeval = ydata(jspline)
+         return
+      elseif (xeval  > maxx) then
+         jspline=NPT;
+         yeval = ydata(jspline)
+         return
+      else
+         is = 0;
+         inc = min(inc,NPT+is);
+         loopinc : DO while (inc > 0)
+         if (is+inc < NPT) then
+            loopsrc: DO while (xdata(is+inc) < xeval)
+            is = is+inc;
+            if (is+inc > NPT) then
+               EXIT loopsrc
+            end if
+         end DO loopsrc
+      end if
+      if (inc == 1) EXIT loopinc
+      inc = nint(dble(inc)/4d0);
+      end DO loopinc
+!     ii = find(xdata<=xeval);
+      jspline = is;             !  ii(end);
+      end if
+
+      gsp(1:5) = (/b(jspline),c(jspline),d(jspline),e(jspline),f(jspline)/);
+      alp(1) = xeval-xdata(jspline);
+      alp(2) = alp(1)*alp(1);
+      alp(3) = alp(2)*alp(1);
+      alp(4) = alp(2)*alp(2);
+      alp(5) = alp(2)*alp(3);
+      yeval = ydata(jspline) + sum(alp*gsp);
+      end 
+cccccccccccccccccccc
+
+
+      subroutine addketou(
+     &     chf_fra[u],
+     &     chf_box[box])
+
+      integer chf_ddecl[i;j;k],idir
+      real_t Invrho, rho2kinetic, rhovel
+        
+      chf_multido[box;i;j;k]
+
+      Invrho = 1.d0/u(chf_ix[i;j;k],CRHO)
+      rho2kinetic = 0d0
+      do idir = 0, CH_SPACEDIM-1
+         rhovel = u(chf_ix[i;j;k], QVELX+idir)
+         rho2kinetic = rho2kinetic + half*(rhovel*rhovel)
+      enddo
+      u(chf_ix[i;j;k],CENG) = u(chf_ix[i;j;k],CENG) + rho2kinetic*Invrho
+
+      chf_enddo
+
+
+      return
+
+      end
+        
+        
+
+      SUBROUTINE QUINAT(chf_const_vr[X], chf_const_vr[Y], chf_vr[B],
+     $     chf_vr[C], chf_vr[D],chf_vr[E], chf_vr[F])                       
+c
+c
+c
+c
+c     QUINAT COMPUTES THE COEFFICIENTS OF A QUINTIC NATURAL QUINTIC SPLI
+c     S(X) WITH KNOTS X(I) INTERPOLATING THERE TO GIVEN FUNCTION VALUES:
+c               S(X(I)) = Y(I)  FOR I = 1,2, ..., NPT.
+c     IN EACH INTERVAL (X(I),X(I+1)) THE SPLINE FUNCTION S(XX) IS A
+c     POLYNOMIAL OF FIFTH DEGREE:
+c     S(XX) = ((((F(I)*P+E(I))*P+D(I))*P+C(I))*P+B(I))*P+Y(I)    (*)
+c           = ((((-F(I)*Q+E(I+1))*Q-D(I+1))*Q+C(I+1))*Q-B(I+1))*Q+Y(I+1)
+c     WHERE  P = XX - X(I)  AND  Q = X(I+1) - XX.
+c     (NOTE THE FIRST SUBSCRIPT IN THE SECOND EXPRESSION.)
+c     THE DIFFERENT POLYNOMIALS ARE PIECED TOGETHER SO THAT S(X) AND
+c     ITS DERIVATIVES UP TO S"" ARE CONTINUOUS.
+c
+c        INPUT:
+c
+c     NPT          NUMBER OF DATA POINTS, (AT LEAST THREE, I.E. NPT > 2)
+c     X(1:NPT)     THE STRICTLY INCREASING OR DECREASING SEQUENCE OF
+c                KNOTS.  THE SPACING MUST BE SUCH THAT THE FIFTH POWER
+c                OF X(I+1) - X(I) CAN BE FORMED WITHOUT OVERFLOW OR
+c                UNDERFLOW OF EXPONENTS.
+c     Y(1:NPT)     THE PRESCRIBED FUNCTION VALUES AT THE KNOTS.
+c
+c        OUTPUT:
+c
+c     B,C,D,E,F  THE COMPUTED SPLINE COEFFICIENTS AS IN (*).
+c         (1:NPT)  SPECIFICALLY
+c                B(I) = S'(X(I)), C(I) = S"(X(I))/2, D(I) = S"'(X(I))/6,
+c                E(I) = S""(X(I))/24,  F(I) = S""'(X(I))/120.
+c                F(NPT) IS NEITHER USED NOR ALTERED.  THE FIVE ARRAYS
+c                B,C,D,E,F MUST ALWAYS BE DISTINCT.
+c
+c        OPTION:
+c
+c     IT IS POSSIBLE TO SPECIFY VALUES FOR THE FIRST AND SECOND
+c     DERIVATIVES OF THE SPLINE FUNCTION AT ARBITRARILY MANY KNOTS.
+c     THIS IS DONE BY RELAXING THE REQUIREMENT THAT THE SEQUENCE OF
+c     KNOTS BE STRICTLY INCREASING OR DECREASING.  SPECIFICALLY:
+c
+c     IF X(J) = X(J+1) THEN S(X(J)) = Y(J) AND S'(X(J)) = Y(J+1),
+c     IF X(J) = X(J+1) = X(J+2) THEN IN ADDITION S"(X(J)) = Y(J+2).
+c
+c     NOTE THAT S""(X) IS DISCONTINUOUS AT A DOUBLE KNOT AND, IN
+c     ADDITION, S"'(X) IS DISCONTINUOUS AT A TRIPLE KNOT.  THE
+c     SUBROUTINE ASSIGNS Y(I) TO Y(I+1) IN THESE CASES AND ALSO TO
+c     Y(I+2) AT A TRIPLE KNOT.  THE REPRESENTATION (*) REMAINS
+c     VALID IN EACH OPEN INTERVAL (X(I),X(I+1)).  AT A DOUBLE KNOT,
+c     X(J) = X(J+1), THE OUTPUT COEFFICIENTS HAVE THE FOLLOWING VALUES:
+c       Y(J) = S(X(J))          = Y(J+1)
+c       B(J) = S'(X(J))         = B(J+1)
+c       C(J) = S"(X(J))/2       = C(J+1)
+c       D(J) = S"'(X(J))/6      = D(J+1)
+c       E(J) = S""(X(J)-0)/24     E(J+1) = S""(X(J)+0)/24
+c       F(J) = S""'(X(J)-0)/120   F(J+1) = S""'(X(J)+0)/120
+c     AT A TRIPLE KNOT, X(J) = X(J+1) = X(J+2), THE OUTPUT
+c     COEFFICIENTS HAVE THE FOLLOWING VALUES:
+c       Y(J) = S(X(J))         = Y(J+1)    = Y(J+2)
+c       B(J) = S'(X(J))        = B(J+1)    = B(J+2)
+c       C(J) = S"(X(J))/2      = C(J+1)    = C(J+2)
+c       D(J) = S"'((X(J)-0)/6    D(J+1) = 0  D(J+2) = S"'(X(J)+0)/6
+c       E(J) = S""(X(J)-0)/24    E(J+1) = 0  E(J+2) = S""(X(J)+0)/24
+c       F(J) = S""'(X(J)-0)/120  F(J+1) = 0  F(J+2) = S""'(X(J)+0)/120
+c
+      INTEGER I, M,NPT
+      real_t B1, P, PQ, PQQR, PR, P2, P3, Q, QR, Q2, Q3, R, R2, S, T, U, V
+c
+      NPT = chf_ubound[X]-1
+      IF (NPT.LE.1) GO TO 190
+c
+c     COEFFICIENTS OF A POSITIVE DEFINITE, PENTADIAGONAL MATRIX,
+c     STORED IN D,E,F FROM 1 TO NPT-2.
+c
+      M = NPT - 2
+      Q = X(1) - X(0)
+      R = X(2) - X(1)
+      Q2 = Q*Q
+      R2 = R*R
+      QR = Q + R
+      D(0) = 0d0
+      E(0) = 0d0
+      D(1) = 0d0
+      IF (Q.NE.0d0) D(1) = 6d0*Q*Q2/(QR*QR)
+c
+      IF (M.LT.1) GO TO 40
+      DO  I=1,M
+         P = Q
+         Q = R
+         R = X(I+2) - X(I+1)
+         P2 = Q2
+         Q2 = R2
+         R2 = R*R
+         PQ = QR
+         QR = Q + R
+         IF (Q) 20, 10, 20
+ 10      D(I+1) = 0d0
+         E(I) = 0d0
+         F(I-1) = 0d0
+         CYCLE
+ 20      Q3 = Q2*Q
+         PR = P*R
+         PQQR = PQ*QR
+         D(I+1) = 6d0*Q3/(QR*QR)
+         D(I) = D(I) + (Q+Q)*(15d0*PR*PR+(P+R)*Q*(20d0*PR+7d0*Q2)+Q2*(8d0*(P2+R2)+21d0*PR+Q2+Q2))/(PQQR*PQQR)
+         D(I-1) = D(I-1) + 6d0*Q3/(PQ*PQ)
+         E(I) = Q2*(P*QR+3d0*PQ*(QR+R+R))/(PQQR*QR)
+         E(I-1) = E(I-1) + Q2*(R*PQ+3d0*QR*(PQ+P+P))/(PQQR*PQ)
+         F(I-1) = Q3/PQQR
+      END DO
+c     
+ 40   IF (R.NE.0d0) D(M) = D(M) + 6d0*R*R2/(QR*QR)
+c     
+c     FIRST AND SECOND ORDER DIVIDED DIFFERENCES OF THE GIVEN FUNCTION
+c     VALUES, STORED IN B FROM 2 TO NPT AND IN C FROM 3 TO NPT
+c     RESPECTIVELY. CARE IS TAKEN OF DOUBLE AND TRIPLE KNOTS.
+c     
+      DO  I=1,NPT
+         IF (X(I).NE.X(I-1)) GO TO 50
+         B(I) = Y(I)
+         Y(I) = Y(I-1)
+         CYCLE
+ 50      B(I) = (Y(I)-Y(I-1))/(X(I)-X(I-1))
+      END DO
+      DO  I=2,NPT
+         IF (X(I).NE.X(I-2)) GO TO 70
+         C(I) = B(I)*0.5d0
+         B(I) = B(I-1)
+         CYCLE
+ 70      C(I) = (B(I)-B(I-1))/(X(I)-X(I-2))
+      END DO
+c     
+c     SOLVE THE LINEAR SYSTEM WITH C(I+2) - C(I+1) AS RIGHT-HAND SIDE.
+c     
+      IF (M.LT.1) GO TO 100
+      P = 0d0
+      C(0) = 0d0
+      E(M) = 0d0
+      F(0) = 0d0
+      F(M-1) = 0d0
+      F(M) = 0d0
+      C(1) = C(3) - C(2)
+      D(1) = 1d0/D(1)
+c     
+      IF (M.LT.2) GO TO 100
+      DO I=2,M
+         Q = D(I-1)*E(I-1)
+         D(I) = 1d0/(D(I)-P*F(I-2)-Q*E(I-1))
+         E(I) = E(I) - Q*F(I-1)
+         C(I) = C(I+2) - C(I+1) - P*C(I-2) - Q*C(I-1)
+         P = D(I-1)*F(I-1)
+      END DO
+c     
+ 100  I = NPT - 1
+      C(NPT-1) = 0d0
+      C(NPT) = 0d0
+      IF (NPT.LT.3) GO TO 120
+      DO  M=3,NPT
+c     I = NPT-2, ..., 2
+         I = I - 1
+         C(I) = (C(I)-E(I)*C(I+1)-F(I)*C(I+2))*D(I)
+      END DO
+c     
+c     INTEGRATE THE THIRD DERIVATIVE OF S(X).
+c     
+ 120  M = NPT - 1
+      Q = X(1) - X(0)
+      R = X(2) - X(1)
+      B1 = B(1)
+      Q3 = Q*Q*Q
+      QR = Q + R
+      IF (QR) 140, 130, 140
+ 130  V = 0d0
+      T = 0d0
+      GO TO 150
+ 140  V = C(1)/QR
+      T = V
+ 150  F(0) = 0d0
+      IF (Q.NE.0d0) F(0) = V/Q
+      DO  I=1,M
+         P = Q
+         Q = R
+         R = 0d0
+         IF (I.NE.M) R = X(I+2) - X(I+1)
+         P3 = Q3
+         Q3 = Q*Q*Q
+         PQ = QR
+         QR = Q + R
+         S = T
+         T = 0d0
+         IF (QR.NE.0d0) T = (C(I+1)-C(I))/QR
+         U = V
+         V = T - S
+         IF (PQ) 170, 160, 170
+ 160     C(I) = C(I-1)
+         D(I) = 0d0
+         E(I) = 0d0
+         F(I) = 0d0
+         CYCLE
+ 170     F(I) = F(I-1)
+         IF (Q.NE.0d0) F(I) = V/Q
+         E(I) = 5d0*S
+         D(I) = 10d0*(C(I)-Q*S)
+         C(I) = D(I)*(P-Q) + (B(I+1)-B(I)+(U-E(I))*P3-(V+E(I))*Q3)/PQ
+         B(I) = (P*(B(I+1)-V*Q3)+Q*(B(I)-U*P3))/PQ - P*Q*(D(I)+E(I)*(Q-P))
+      END DO
+c     
+c     END POINTS X(1) AND X(NPT).
+c     
+      P = X(1) - X(0)
+      S = F(0)*P*P*P
+      E(0) = 0d0
+      D(0) = 0d0
+      C(0) = C(1) - 10d0*S
+      B(0) = B1 - (C(0)+S)*P
+c     
+      Q = X(NPT) - X(NPT-1)
+      T = F(NPT-1)*Q*Q*Q
+      E(NPT) = 0d0
+      D(NPT) = 0d0
+      C(NPT) = C(NPT-1) + 10d0*T
+      B(NPT) = B(NPT) + (C(NPT)-T)*Q
+ 190  RETURN
+      END 
+      

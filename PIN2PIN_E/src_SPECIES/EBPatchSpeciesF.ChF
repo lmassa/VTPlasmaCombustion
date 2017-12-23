@@ -1,0 +1,149 @@
+
+cccccccccccccccc
+      subroutine specriemann(
+     &     chf_box[dcalc],
+     &     chf_fra[primgdnv],
+     &     chf_const_fra[primleft],
+     &     chf_const_fra[primrigh],
+c     &     chf_const_fra[normalvel],
+     &     chf_const_fra1[advectvel],
+     &     chf_const_int[facedir],
+     &     chf_const_int[nprim] )
+
+      real_t  velhi, vello, velface
+      real_t tol
+      integer chf_ddecl[i; j; k]
+      integer chf_ddecl[ioff; joff; koff]
+
+      integer spacedim,iv
+
+      chf_dterm[
+      ioff = chf_id(0,facedir);
+      joff = chf_id(1,facedir);
+      koff = chf_id(2,facedir)]
+
+      spacedim = CH_SPACEDIM
+
+      tol = 1.e-12
+
+      do iv = 0,nprim - 1
+         chf_multido[dcalc;i;j;k]
+
+         velface  = advectvel(chf_ix[i;j;k])
+c         if(velface.gt.zero) then
+         if(velface.gt.tol) then
+            primgdnv(chf_ix[i;j;k],iv) = primleft(chf_ix[i-ioff;j-joff;k-koff],iv)
+c         else if(velface.lt.zero) then
+         else if(velface.lt.-tol) then
+            primgdnv(chf_ix[i;j;k],iv) = primrigh(chf_ix[i;j;k],iv)
+         else
+            primgdnv(chf_ix[i;j;k],iv) =
+     $           half*(
+     $           primrigh(chf_ix[i     ;j     ;k     ],iv) +
+     $           primleft(chf_ix[i-ioff;j-joff;k-koff],iv))
+         endif
+
+         chf_enddo
+      enddo
+
+      return
+      end
+
+cccccccccccccccc
+      subroutine GETFLUXSPEC(
+     &     chf_box[dcalc],
+     &     chf_const_fra[primgdnv],
+     &     chf_const_fra1[advectvel],
+     &     chf_const_int[facedir],
+     &     chf_fra[flux],
+     &     chf_const_int[nprim])
+
+      real_t  velface
+      integer chf_ddecl[i; j; k]
+
+      integer iv
+
+      do iv = 0,nprim - 1
+         chf_multido[dcalc;i;j;k]
+
+         velface  = advectvel(chf_ix[i;j;k])
+         flux(chf_ix[i;j;k], iv) = velface*primgdnv(chf_ix[i;j;k],iv)
+
+         chf_enddo
+      enddo
+
+      return
+      end
+
+cccccccccccccccc
+      subroutine FLOORSPECIES(
+     &     chf_box[dcalc],
+     &     chf_fra[state],
+     &     chf_const_real[mx],
+     &     chf_const_real[mn])
+
+      integer chf_ddecl[i; j; k], ivar
+#include "EBEOSCommon.fh"
+
+
+c     enforce floors
+      do ivar = 0, chf_ncomp[state] - 1
+         chf_multido[dcalc;i;j;k]
+
+         state(chf_ix[i;j;k],ivar) = min(max(state(chf_ix[i;j;k],ivar), mn),mx)
+    
+         chf_enddo
+      enddo
+
+      return
+      end
+
+cccccccccccccccccccccccccccccccccccccccccccccc
+
+      
+cccccccccccccccc
+!! routine used in the IBC file
+!multiplication of a scalra and a FAB
+      subroutine SCALARFABMULT(
+     &     chf_fra1[flux],
+     &     chf_const_fra1[advectvel],
+     &     chf_const_real[value],
+     &     chf_box[box])
+
+      real_t  velface
+      integer chf_ddecl[i; j; k]
+
+
+      chf_multido[box;i;j;k]
+      
+      velface  = advectvel(chf_ix[i;j;k])
+      flux(chf_ix[i;j;k]) = velface*value
+      
+      chf_enddo
+
+      return
+      end
+      subroutine SPECIESEXTRAPBC(
+     &     chf_fra[flux],
+     &     chf_const_fra[wextrap],
+     &     chf_const_fra1[advectvel],
+     &     chf_const_int[nspec],
+     &     chf_box[box])
+
+      real_t  velface
+      integer chf_ddecl[i;j;k], ivar
+
+
+#include "EBEOSCommon.fh"
+
+      chf_multido[box;i;j;k]
+
+      velface  = advectvel(chf_ix[i;j;k])
+      do ivar = 0, nspec-1
+         flux(chf_ix[i;j;k], ivar) = wextrap(chf_ix[i;j;k], ivar)*velface
+      enddo
+
+      chf_enddo
+
+      return
+      end

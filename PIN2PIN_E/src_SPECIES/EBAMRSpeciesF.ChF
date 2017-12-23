@@ -1,0 +1,151 @@
+C      _______              __
+C     / ___/ /  ___  __ _  / /  ___
+C    / /__/ _ \/ _ \/  V \/ _ \/ _ \
+C    \___/_//_/\___/_/_/_/_.__/\___/
+C    Please refer to Copyright.txt, in Chombo''s root directory.
+
+#include "EBLGIntegrator.H"
+#include "CONSTANTS.H"
+
+      subroutine cellgradebspec(
+     $     chf_fra1[grad],
+     $     chf_const_fra1[vel],
+     $     chf_const_real[dx],
+     $     chf_box[lobox],
+     $     chf_box[hibox],
+     $     chf_box[centerbox],
+     $     chf_const_int[haslo],
+     $     chf_const_int[hashi],
+     $     chf_const_int[divdir])
+
+      integer chf_ddecl[ii,i;jj,j;kk,k]
+
+      chf_dterm[
+      ii = chf_id(divdir, 0);
+      jj = chf_id(divdir, 1);
+      kk = chf_id(divdir, 2)]
+
+      chf_multido[centerbox;i;j;k]
+
+      grad(chf_ix[i;j;k]) =
+     $     (    vel(chf_ix[i+ii;j+jj;k+kk])
+     $     -    vel(chf_ix[i-ii;j-jj;k-kk]) )/(two*dx)
+
+      chf_enddo
+
+      if(haslo.eq.1) then
+         chf_multido[lobox;i;j;k]
+
+         grad(chf_ix[i;j;k]) =
+     $        (    vel(chf_ix[i+ii;j+jj;k+kk])
+     $        -    vel(chf_ix[i   ;j   ;k   ]) )/(dx)
+
+         chf_enddo
+      endif
+
+      if(hashi.eq.1) then
+         chf_multido[hibox;i;j;k]
+
+         grad(chf_ix[i;j;k]) =
+     $        (    vel(chf_ix[i   ;j   ;k   ])
+     $        -    vel(chf_ix[i-ii;j-jj;k-kk]) )/(dx)
+
+         chf_enddo
+      endif
+
+      return
+      end
+
+      subroutine SHARFETTERGUMMEL(
+     &     CHF_FRA[MobData],
+     &     CHF_FRA[DiffData],
+     &     CHF_BOX[region],
+     &     chf_const_real[dx],
+     &     CHF_CONST_INT[nspec]
+     &     )
+
+      integer CHF_DDECL[i;j;k]
+      integer nsrc
+      real_t z,capD,capM,zexp,f1
+
+      do nsrc = 0, nspec-1
+         CHF_MULTIDO[region; i; j; k]
+         
+         capD = DiffData(CHF_IX[i;j;k],nsrc)
+         capM = MobData (CHF_IX[i;j;k],nsrc)*dx
+         if(.not. abs(capD) < 1d299) capD=1d0;
+         if(.not. abs(capM) < 1d100) capM=0d0;
+
+         if(capD > 1d-13) then
+            z = capM/capD
+            zexp = exp(z)
+            if(.not.zexp < 1d50) then
+              !capM must be >0
+               DiffData(CHF_IX[i;j;k],nsrc) = 0d0
+               MobData(CHF_IX[i;j;k],nsrc) = capM
+            endif
+            if(zexp < 1d50) then
+               f1=1d0
+               if(abs(zexp-1d0) > 1d-14)f1=z/(zexp-1d0)
+               DiffData(CHF_IX[i;j;k],nsrc) = capD*f1
+               MobData(CHF_IX[i;j;k],nsrc) = capD*f1*zexp
+            endif
+         endif
+         if(capD <= 1d-13) then
+            if(capM <= 0d0) then
+               DiffData(CHF_IX[i;j;k],nsrc) = - capM
+               MobData(CHF_IX[i;j;k],nsrc) = 0d0
+            endif
+            if(capM > 0d0) then
+               DiffData(CHF_IX[i;j;k],nsrc) = 0d0
+               MobData(CHF_IX[i;j;k],nsrc) = capM
+            endif
+         endif
+
+            
+         !!if(.not. abs(MobData(chf_ix[i;j;k],nsrc)) < 1d299)
+     !!$        print'(3i3," NAN SHARFETTERGUMMEL",1p123e12.4)',i,j,nsrc,
+     !!$        capD,capM,z,zexp, DiffData(CHF_IX[i;j;k],nsrc),MobData(CHF_IX[i;j;k],nsrc)
+           !!if(i == 673 .and. j == 88) print'(i3, "SHARFETTERGUMMEL", 1p123e12.4 )',nsrc,capD,capM,z,zexp, DiffData(CHF_IX[i;j;k],nsrc),MobData(CHF_IX[i;j;k],nsrc)
+         chf_enddo
+      enddo
+
+      return
+      end
+
+!finite difference version
+      subroutine SHARFETTERGUMMEL_FD(
+     &     CHF_FRA[MobData],
+     &     CHF_FRA[DiffData],
+     &     CHF_BOX[region],
+     &     chf_const_real[dx],
+     &     CHF_CONST_INT[nspec]
+     &     )
+
+      integer CHF_DDECL[i;j;k]
+      integer nsrc
+      real_t z,capD,capM,zexp,f1
+
+      do nsrc = 0, nspec-1
+         CHF_MULTIDO[region; i; j; k]
+         
+         capD = DiffData(CHF_IX[i;j;k],nsrc)
+         capM = MobData (CHF_IX[i;j;k],nsrc)*dx
+         if(.not. abs(capD) < 1d100) capD=1d0;
+         if(.not. abs(capM) < 1d100) capM=0d0;
+
+         if(capM <= 0d0) then
+            DiffData(CHF_IX[i;j;k],nsrc) = capD - capM
+            MobData(CHF_IX[i;j;k],nsrc) = capD
+         endif
+         if(capM > 0d0) then
+            DiffData(CHF_IX[i;j;k],nsrc) = capD
+            MobData(CHF_IX[i;j;k],nsrc) = capD+ capM
+         endif
+
+          
+         chf_enddo
+      enddo
+
+      return
+      end

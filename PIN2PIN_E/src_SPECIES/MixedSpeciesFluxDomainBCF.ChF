@@ -1,0 +1,35 @@
+  
+#include "CONSTANTS.H"
+        subroutine SETMIXEDFACEFLUX(
+     &    CHF_FRA1[faceFlux],
+     &    CHF_CONST_FRA1[phi],
+     &    CHF_CONST_FRA1[regD],
+     &    CHF_CONST_FRA1[regW],
+     &    CHF_CONST_REAL[value],
+     &    CHF_CONST_REALVECT[dx],
+     &    CHF_CONST_INT[idir],
+     &    CHF_CONST_INT[iside],
+     &    CHF_BOX[box])
+
+        integer CHF_DDECL[i,ii;j,jj;k,kk],facedir
+
+        real_t idx, derT, extrapValue, Wval, Dval
+
+        !!iside =-1, top/right, +1, bottom/left
+        facedir=idir
+        chf_dterm[
+        ii = iside*chf_id(facedir, 0);
+        jj = iside*chf_id(facedir, 1);
+        kk = iside*chf_id(facedir, 2)]
+
+        idx = 1d0/dx(idir)
+
+        CHF_MULTIDO[box;i;j;k]
+        Wval = regW(CHF_IX[i;j;k])
+        Dval = regD(CHF_IX[i;j;k])
+        if(iside > 0) faceFlux(CHF_IX[i;j;k]) = (Dval*phi(CHF_IX[i;j;k]) - Wval*value)*idx
+        if(iside < 0) faceFlux(CHF_IX[i;j;k]) = (Dval*value - Wval*phi(CHF_IX[i;j;k]))*idx
+        CHF_ENDDO
+
+        return
+        end

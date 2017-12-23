@@ -1,0 +1,35 @@
+C      _______              __
+C     / ___/ /  ___  __ _  / /  ___
+C    / /__/ _ \/ _ \/  V \/ _ \/ _ \
+C    \___/_//_/\___/_/_/_/_.__/\___/
+C    Please refer to Copyright.txt, in Chombo''s root directory.
+
+#include "EBLGIntegrator.H"
+#include "CONSTANTS.H"
+
+      subroutine limitbar(
+     $     chf_fra[qbar],
+     $     chf_const_fra[q],
+     $     chf_const_real[Dlimit],
+     $     chf_box[box])
+
+      integer chf_ddecl[i; j; k], ivar
+      real_t Delta
+
+
+      chf_multido[box;i;j;k]
+
+      do ivar = 0, CNUM-1
+         Delta = qbar(chf_ix[i;j;k],ivar) - q(chf_ix[i;j;k],ivar);
+         if(abs(Delta) > Dlimit) then
+            !!qbar(chf_ix[i;j;k],ivar) = q(chf_ix[i;j;k],ivar) + 0.5d0*Delta
+            if(Delta > 0) qbar(chf_ix[i;j;k],ivar) = q(chf_ix[i;j;k],ivar) + Dlimit
+            if(Delta < 0) qbar(chf_ix[i;j;k],ivar) = q(chf_ix[i;j;k],ivar) - Dlimit
+
+         endif
+      enddo
+
+      chf_enddo
+
+      return
+      end

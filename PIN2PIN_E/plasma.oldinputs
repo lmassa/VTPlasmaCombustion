@@ -1,0 +1,185 @@
+## global flags
+only_fluid = false
+has_diffusion = true
+explicit_diffusion =true
+do_initial_regrid = false
+constBg = 0
+
+##Fluid stuff (LM)
+cfl = 0.9  #was 0.004
+initial_cfl = 0.05  #was0.0001
+verbosity = 0
+use_mass_redist = 1
+max_step = 9994601
+max_time = 50.0
+max_dt_growth = 1.1
+dt_tolerance_factor = 1.1
+fixed_dt   = -1
+gamma = 1.664 #Helium 27C
+
+# Fluid parameters (LM)
+##inviscid = 1    ## if inviscid skip the viscous part
+Reynolds = 1.25e6  # 500/theta_mom    ##1e5/1.4
+Prandtl = 0.68
+tinf = 300.0
+pinf = 39999.6 # these are 300 torr
+theta_mom = 0.0004 #0.001
+Mach_inflow = 0.5
+shock_center = 0.15
+shock_normal = 0
+shock_backward = 0
+logflag = 0
+
+# Fluid Boundary Conditions (LM)
+# bc flags #read by Navier  Solver
+#    0 = Neumann with value
+#    1 = Dirichlet with value 
+#    2 = Mixed
+ns.eb_bc_type     = 1  ## hardwired in the code
+ns.domain_bc_type = 0
+ns.order_ebbc     = 2
+ns.domain_bc_value = 0.
+ns.eb_bc_value = 0.
+ns.eb_bc_typeT = 0  #Neumann temperature
+ns.eb_bc_valueT = 0.
+##parameters of viscous solver
+#1 gsrb, 0 point jacobi		
+ns.relax_type = 1
+ns.num_smooth = 12
+ns.max_iterations = 6
+#1 vcycle, 2 wcycle and so on (use 1)
+ns.num_mg = 1
+ns.tolerance = 1.0e-5
+ns.hang = 1.0e-10
+ns.do_implicit_reflux = false
+#auto gen ghost
+ns.ghostPhi = 4 4 4
+ns.ghostRhs = 4 4 4 
+#auto gen num_precond
+ns.num_pre_cond_iters = 5
+ns.verbosity = 1
+
+#tag/regrid params
+vorticity_tag_buffer_size = 2
+species_tag_buffer_size = 1
+electric_tag_buffer_size = 2
+tag_shrink_domain = 0  ## do not tag the prob doamin walls
+plasma_regrid_steps = 5
+vorticity_refine_thresh = 230.0 ## for NS
+electric_refine_thresh = 2.5e6  ## for Electric poisson Solver
+electron_refine_thresh = 1e-9 ##for electron concentration
+cations_refine_thresh = 1e-9 ##for cations
+regrid_interval = 50 -5 -5 -5 -5 -5
+tag_all_irreg = 1
+isperiodicz = 0
+
+#AMR params
+checkpoint_interval = 100
+plot_interval = -1000 #100
+nplot_per_period =100 
+chk_prefix = chk
+plot_prefix  = plt
+###slope switches
+use_fourth_order_slopes = 1
+use_flattening = 1
+use_art_visc   = 1
+artificial_viscosity = 0.1
+redist_radius = 1
+
+#MD solver params
+do_lazy_relax = false
+#1:levelMultiColorGS; 2:levelGSRB; 3:levelSlowRelax; 4:levelMultiColorGSClone
+mg_relax_type  = 1
+slow_factor = 0.25  #only for levelSlowRelax (mg_relax_type  = 3)
+mg_num_smooths = 5
+num_pre_cond_iters = 20
+mg_iter_max    = 20  #this is used also as relax iterations w/o MG
+mg_hang        = 1.0e-13
+mg_eps         = 1.0e-11
+#1 vcycle, 2 wcycle and so on
+mg_num_cycles = 1
+max_depth = 1
+
+
+# bc flags
+#    0 = Neumann with value
+#    1 = Dirichlet with value 
+#    10 = Mixed Dirichlet-Neumann function of position 
+# note: currently same function used for D & N conditions (=0), may need to split later
+# Domain BCs
+domain_bc_type = 100
+dom_mixbc = 0 0 0 10 0 0   ## xhi,xlo,yhi,ylo,(zhi,zlo)  # for DBD discharge: 0 0 0 10 0 0 
+dom_d_xint =  0.0245 0.0365
+#dom_d_xint = 0.03762 0.04002
+dom_dir_bc_value = 0.0
+dom_neu_bc_value = 0.0
+#is_periodic = 0 0 0 
+dom_order_eb = 2
+
+# EB BCs 
+eb_bc_type     = 100
+eb_bc_sel     = 10
+# 4 points for direct discharge:
+#eb_d_xint = 0.03 0.0325 0.035 0.0375
+# eb_d_xint = -10.0 0.0324 0.03762 0.04002
+eb_d_xint = 0.0125 0.0245 10 11
+# eb_d_xint = 0.02 0.04
+eb_dir_bc_value = -2828.4 #RMS 2kV
+eb_neu_bc_value = 0.0
+order_ebbc     = 2
+#frequency of voltage at the EB; omegaEB = 2 pi f
+frequency = 5000 #MD cancel use 5kHz for paper runs #5kHz: Caution sine function at BC for transient (if omega=0, change to cosine in PoissonEBMixBcFunc.cpp)
+
+# RHS 
+rhs0 = 0
+
+#coefficient of the identity term (MD)
+alpha = 0
+#coefficient of laplacian
+beta = 1
+
+## MATERIALS 
+eps_gas = 8.90288585061691E-12
+eps_diel = 3.098965736167E-11
+#hardwired for now, later array to be passed to/from EBAMRPoissonOp
+src = 0
+
+##GEOMETRY 
+# domain_length = 0.4 0.05 0.1
+domain_length = 0.05 0.02 0.01
+
+###GRID 
+max_level    = 2  #for velocity
+max_level_species = 2
+ref_ratio    = 2 2 2 2 2 2 2
+#n_cells      = 256 32 64
+n_cells      = 200 80 40
+#n_cells      = 400 80 80
+
+# OSU EB
+which_geom = 300
+OSUsphere_radius = 1e-3
+OSUsphere_distance = 1e-2
+
+block_factor = 4
+fill_ratio   = 0.75
+##buffer_size  = 2
+grid_buffer_size = 2
+max_grid_size = 20
+
+#auto gen ghost
+ghostPhi = 1 1 1 1 1 1
+# ghostRhs = 4 4 4 4 
+# MD original:
+##ghostRhs = 0 0 0 0 0 0 
+
+#sfd_chi = 1
+#sfd_Dl = 0.01
+
+#for file diffing
+do_scaling = true
+first_average = 600  ## 100
+last_average = 800
+last_output = -1
+#directory = /scratch/01179/massa/LM_AMR/execThetaHalfM1.2
+directory = /scratch/01179/massa/LM_AMR/execPeriod

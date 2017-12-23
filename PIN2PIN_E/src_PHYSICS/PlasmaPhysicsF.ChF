@@ -1,0 +1,897 @@
+C      _______              __
+C     / ___/ /  ___  __ _  / /  ___
+C    / /__/ _ \/ _ \/  V \/ _ \/ _ \
+C    \___/_//_/\___/_/_/_/_.__/\___/
+C    Please refer to Copyright.txt, in Chombo's root directory.
+
+
+
+C     ------------------------------------------------------
+C     Plasma source terms
+C     ------------------------------------------------------
+
+      subroutine PSOURCEFAB(
+     &     CHF_FRA[dst],
+     &     CHF_CONST_FRA[x],
+     &     CHF_CONST_FRA[y],
+     &     CHF_CONST_VR[coef],
+     &     CHF_CONST_INT[destcomp],
+     &     CHF_BOX[region]
+     &     )
+
+      integer chf_ddecl[i; j; k]
+      integer m, l, e
+      real_t src
+          
+      CHF_MULTIDO[region; i; j; k]
+        src = 0;
+      	do m = 0, CHF_NCOMP[x] - 1
+            src = src + x(CHF_IX[i;j;k],m) * coef(m)
+        enddo
+        e = CHF_NCOMP[dst] - 5
+        dst(CHF_IX[i;j;k],destcomp) = src
+        if (destcomp .eq. e) then
+           do l = 0, 3
+              dst(CHF_IX[i;j;k], e + 1 + l) = y(CHF_IX[i;j;k],l)
+           enddo
+        endif
+      CHF_ENDDO
+       
+      return
+      end
+
+
+C     ------------------------------------------------------
+C     Plasma energy source terms (including Joule)
+C     ------------------------------------------------------
+
+      subroutine PESOURCEFAB(
+     &     CHF_FRA[dst],
+     &     CHF_CONST_FRA[rr],
+     &     CHF_CONST_FRA[nd],
+     &     CHF_CONST_FRA[te],
+     &     CHF_CONST_FRA[jh],
+     &     CHF_CONST_VR[ecoef],
+     &     CHF_CONST_VR[mass],
+     &     CHF_CONST_VR[sigebg],
+     &     CHF_CONST_VR[sigeo2],
+     &     CHF_CONST_VI[spec],
+     &     CHF_CONST_REAL[nbg],
+     &     CHF_CONST_REAL[mte],
+     &     CHF_CONST_INT[tgcomp],
+     &     CHF_CONST_INT[eind],
+     &     CHF_CONST_INT[bgind],
+     &     CHF_CONST_INT[o2ind],
+     &     CHF_CONST_INT[cstte],
+     &     CHF_CONST_INT[cstbg],
+     &     CHF_BOX[region]
+     &     )
+
+      integer chf_ddecl[i; j; k]
+      integer r, s, l, jj
+      real_t buffel, buffin, q, kb, na, tfac, tel, temax, een, exsbg, exso2, tmp, ve, eV, no2, ng, lte
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na)
+      parameter (temax = 15.0*11604.5)
+
+    
+      CHF_MULTIDO[region; i; j; k]
+
+        
+        tel = te(CHF_IX[i;j;k],1-tgcomp)*tfac/nd(CHF_IX[i;j;k],eind)
+
+        if (cstte .eq. 0) then
+            tel = min(max(tel,3d2),temax) !MDcancel
+            een = te(CHF_IX[i;j;k],1-tgcomp)/(nd(CHF_IX[i;j;k],eind)*na)
+        else
+            tel = mte
+            een = tel/tfac/na
+        endif
+        eV = een/q
+
+        if (cstbg .eq. 0) then
+            ng = nd(CHF_IX[i;j;k],bgind)        !MDCancel for air: no2 = nd(CHF_IX[i;j;k],o2ind)
+        else
+            ng = nbg
+        endif
+
+        buffin = 0d0
+      	do r = 0, CHF_NCOMP[rr] - 1
+            if( eV .gt. abs(ecoef(r)) ) then
+                 buffin = buffin + rr(CHF_IX[i;j;k], r) * ecoef(r) 
+            endif
+        enddo
+        buffin = buffin * q * na
+
+        !exsbg = 1.0
+        !exso2 = 1.0
+        !do l = 0, 2
+        !   exsbg = exsbg * exp(sigebg(3*l)*exp(-((log(een)-sigebg(3*l+1))/sigebg(3*l+2))**2))
+        !   exso2 = exso2 * exp(sigeo2(3*l)*exp(-((log(een)-sigeo2(3*l+1))/sigeo2(3*l+2))**2))
+        !enddo
+        ! only for Helium
+        lte = log10(tel)
+        exsbg = sigebg(0)
+        do jj = 1, 7
+            exsbg = exsbg + sigebg(jj) * lte**jj
+        enddo
+        exsbg = 10.0**exsbg		
+
+        ve = SQRT(2.0*kb*na*abs(tel)/mass(spec(eind)))
+        buffel = 3.0 * kb * na**2 * nd(CHF_IX[i;j;k],eind) * mass(spec(eind)) * (tel-te(CHF_IX[i;j;k],tgcomp)) * ve * ( exsbg * ng / mass(spec(bgind)) )
+        !MDCancel for air replace ng by nn2, +  exso2 * no2 / mass(spec(o2ind)) )
+        if (cstte .eq. 0) then
+            dst(CHF_IX[i;j;k],0) = jh(CHF_IX[i;j;k], eind+1) - buffel - buffin
+        endif
+        dst(CHF_IX[i;j;k],1) = jh(CHF_IX[i;j;k], eind+1)
+        dst(CHF_IX[i;j;k],2) = buffel
+        dst(CHF_IX[i;j;k],3) = buffin
+
+        !if(j==13 .and. i==140) then 
+        !   print'(2i3,"ElecSourceF (140,13) tel, ng, joule, elast, inelas, total",1p123e12.4)', tel, ng, jh(CHF_IX[i;j;k], eind+1), buffel, buffin, dst(CHF_IX[i;j;k],0)
+        !   print*,i, j, tel, ng, jh(CHF_IX[i;j;k], eind+1), buffel, buffin, dst(CHF_IX[i;j;k],0)
+        !endif
+
+      CHF_ENDDO
+       
+      return
+      end
+
+C     ------------------------------------------------------
+C     Fluid source terms (non-including Joule)
+C     ------------------------------------------------------
+
+      subroutine FSOURCEFAB(
+     &     CHF_FRA[dst],
+     &     CHF_CONST_FRA[rr],
+     &     CHF_CONST_FRA[nd],
+     &     CHF_CONST_FRA[te],
+     &     CHF_CONST_FRA[gp],
+     &     CHF_CONST_FRA[velo],
+     &     CHF_CONST_VR[gcoef],
+     &     CHF_CONST_VR[zcoef],
+     &     CHF_CONST_VR[mass],
+     &     CHF_CONST_VR[sigebg],
+     &     CHF_CONST_VR[sigeo2],
+     &     CHF_CONST_VI[spec],
+     &     CHF_CONST_REAL[nbg],
+     &     CHF_CONST_REAL[mte],
+     &     CHF_CONST_REAL[eta],
+     &     CHF_CONST_INT[tgcomp],
+     &     CHF_CONST_INT[eind],
+     &     CHF_CONST_INT[bgind],
+     &     CHF_CONST_INT[o2ind],
+     &     CHF_CONST_INT[cstbg],
+     &     CHF_CONST_INT[cstte],
+     &     CHF_CONST_INT[mombegin],
+     &     CHF_CONST_INT[enrgIndx],
+     &     CHF_BOX[region]
+     &     )
+
+      integer chf_ddecl[i; j; k]
+      integer r, l, m, spacedim, s, jj 
+      real_t buff, q, kb, na, tfac, tel, temax, een,  exsbg, exso2, tmp, ve, charge, lte, ng, Inel
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na)
+      parameter (temax = 15.0*11604.5)
+
+!fluid source terms w/o Joule heating
+      spacedim = CH_SPACEDIM
+    
+      CHF_MULTIDO[region; i; j; k]
+
+        if (cstte .eq. 0) then
+        ! calculate electron energy terms
+
+        Inel = 0d0
+      	do r = 0, CHF_NCOMP[rr] - 1
+            Inel = Inel - rr(CHF_IX[i;j;k], r) * gcoef(r) 
+        enddo
+        Inel = Inel * q * na
+        dst(CHF_IX[i;j;k], enrgIndx) = Inel
+
+        tel = te(CHF_IX[i;j;k],1-tgcomp)*tfac/nd(CHF_IX[i;j;k],eind)
+        if (cstte .eq. 0) then
+            tel = min(max(tel,3d2),temax) !MDcancel
+            een = te(CHF_IX[i;j;k],1-tgcomp)/(nd(CHF_IX[i;j;k],eind)*na)
+        else
+            tel = mte
+            een = tel/tfac/na
+        endif        
+
+        if (cstbg .eq. 0) then
+            ng = nd(CHF_IX[i;j;k],bgind)        !MDCancel for air: no2 = nd(CHF_IX[i;j;k],o2ind)
+        else
+            ng = nbg
+        endif
+       
+        !exsbg = 1.0
+        !exso2 = 1.0
+        !do l = 0, 2
+        !   exsbg = exsbg * exp(sigebg(3*l)*exp(-((log(een)-sigebg(3*l+1))/sigebg(3*l+2))**2))
+        !   exso2 = exso2 * exp(sigeo2(3*l)*exp(-((log(een)-sigeo2(3*l+1))/sigeo2(3*l+2))**2))
+        !enddo
+        lte = log10(tel)
+        exsbg = sigebg(0)
+        do jj = 1, 7
+            exsbg = exsbg + sigebg(jj) * lte**jj
+        enddo
+        exsbg = 10.0**exsbg		
+
+        ve = SQRT(2.0*kb*na*abs(tel)/mass(spec(eind)))
+        buff = 3.0 * kb * na**2 * nd(CHF_IX[i;j;k],eind) * mass(spec(eind)) * (tel-te(CHF_IX[i;j;k],tgcomp)) * ve * ( ng * exsbg / mass(spec(bgind)) )
+        !MDCancel for air replace ng by nn2, + nd(CHF_IX[i;j;k],o2ind) * exso2 / mass(spec(o2ind)) )
+
+        dst(CHF_IX[i;j;k],enrgIndx) = dst(CHF_IX[i;j;k],enrgIndx) + buff
+
+        endif ! cstte
+
+        ! momentum force and advective loss Q*E*V
+        charge = 0d0
+        do s = 0, eind  !excludes the energy (assumes electron is the last spec)
+           charge = charge + zcoef(spec(s)) * nd(CHF_IX[i;j;k], s)
+        enddo
+        charge = charge * q * na
+        
+        do m = 0, spacedim - 1
+           l = mombegin + m
+           dst(CHF_IX[i;j;k], l) = - gp(CHF_IX[i;j;k], m) * charge
+           if (cstte .eq. 0) then
+               dst(CHF_IX[i;j;k],enrgIndx) = dst(CHF_IX[i;j;k],enrgIndx) + dst(CHF_IX[i;j;k], l) * velo(CHF_IX[i;j;k], m)
+           endif ! cstte
+        enddo
+
+
+      CHF_ENDDO
+       
+      return
+      end
+
+C     ----------------------------------------------------------
+C     Reaction Rates [ mol / m^3 / s] 
+C     ----------------------------------------------------------
+
+      subroutine REACRATEFAB(
+     &     CHF_FRA[dst],
+     &     CHF_CONST_FRA[x],
+     &     CHF_CONST_FRA[y],
+     &     CHF_CONST_FRA[gp],
+     &     CHF_CONST_VR[coef],
+     &     CHF_CONST_VR[stoe],
+     &     CHF_CONST_VR[actreac],
+     &     CHF_CONST_VR[transpe],
+     &     CHF_CONST_VI[spec],
+     &     CHF_CONST_REAL[press],
+     &     CHF_CONST_REAL[nbg],
+     &     CHF_CONST_REAL[mte],
+     &     CHF_CONST_INT[destcomp],
+     &     CHF_CONST_INT[varcomp],
+     &     CHF_CONST_INT[ecomp],
+     &     CHF_CONST_INT[bgind],
+     &     CHF_CONST_INT[o2ind],
+     &     CHF_CONST_INT[cstbg],
+     &     CHF_CONST_INT[cstte],
+     &     CHF_BOX[region]
+     &     )
+
+      integer chf_ddecl[i; j; k]
+      integer m, spacedim, idir
+      real_t tvar, tfac, temax, kb, na, q, e, arg, rate, ng, lte, mue, GasPressure, Torr2Pa, EiPcmt, cA, cB, alp, avE, muerepl
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na)
+      parameter (temax = 15.0*11604.5)
+      parameter (Torr2Pa =  133.3224)
+      parameter (muerepl =  q/9.10938215d-31/1.0d12)
+
+      spacedim = CH_SPACEDIM
+
+      CHF_MULTIDO[region; i; j; k]
+
+      e = x(CHF_IX[i;j;k],varcomp)
+      if( cstbg .eq. 0) then
+          ng = y(CHF_IX[i;j;k],bgind) 
+      else
+          ng = nbg
+      endif
+	  ! MDcancel for air: +y(CHF_IX[i;j;k],o2ind)
+	
+      if( coef(0) .eq. -1) then
+          if (cstte .eq. 0) then
+              tvar = min(e*tfac/y(CHF_IX[i;j;k],ecomp),temax) !MDCancel
+          else
+              tvar = mte
+          endif
+          if( tvar > coef(1)) then
+              arg = coef(2)			 	
+              do m = 1, 9
+                  arg = arg + coef(m+2)/tvar**m
+              enddo
+              rate = EXP(arg) !otherwise zero per initialization
+          endif
+      elseif ( coef(0) .eq. 0) then
+          if (cstte .eq. 0) then
+              tvar = min(max(e*tfac/y(CHF_IX[i;j;k],ecomp),3d2),temax) !MDcancel
+          else
+              tvar = mte
+          endif
+          rate = coef(1)*tvar**coef(2)
+      else
+          tvar = e   
+          rate = coef(1)*tvar**coef(2)*EXP(coef(3)/tvar);
+      endif
+
+      ! MDCancel only for Helium 3-species	   
+      ! Ionization
+      if (destcomp .eq. 0) then
+                                ! local field amplitude
+         avE=0;				
+         do idir = 1, CH_SPACEDIM 
+            avE = avE + gp(CHF_IX[i;j;k],idir-1)**2
+         enddo
+         avE = sqrt(avE)
+         
+                                ! electron mobility
+         lte = log(tvar)
+         arg = transpe(1)			 	
+         do m = 1, 8 
+            arg = arg + transpe(m+1)*lte**m
+         enddo
+         mue = exp(arg)/(ng*na) 
+         
+            ! ionization rate custom correction factor for Helium Roy POP06 system
+         EiPcmt=avE/press 
+         cA=4.4e2/Torr2Pa
+         cB=14.0*(1e2/Torr2Pa)**0.4
+         alp=cA*exp(-cB/EiPcmt**0.4)*press
+         rate = alp*mue*avE
+         
+         if(.not. abs(rate) < 1d299) then
+                                !MDCancel from Roy POP06
+            print'(2i3,"NAN electron rate, using simplified model i,j,
+     $           tvar,alp,mue,avE,press",1p123e12.4)',i,j,tvar,alp,mue,
+     $           avE,press,gp(CHF_IX[i;j;k],0:CH_SPACEDIM-1)
+            rate = alp*muerepl*avE
+         endif
+
+      elseif (destcomp .eq. 1) then
+                                ! Recombination
+         rate = 1.12e-7+2.2e-27*1e-6*(ng*na) 
+      endif
+
+      ! end of Helium adder 
+
+      do m = 0, size(spec)-1
+          rate = rate * (y(CHF_IX[i;j;k],m) * na)** stoe(spec(m)) 
+      enddo
+      dst(CHF_IX[i;j;k],destcomp) = rate / na * (ng*na) ** stoe(size(spec))
+
+      CHF_ENDDO
+
+      return
+      end
+
+C     --------------------------------------------------------------
+C     RHS
+C     --------------------------------------------------------------
+
+      subroutine RHSFAB(
+     &     CHF_FRA1[dst],
+     &     CHF_CONST_FRA[x],
+     &     CHF_CONST_VR[coef],
+     &     CHF_CONST_VI[spec],
+     &     CHF_CONST_REAL[epsg],
+     &     CHF_CONST_REAL[epsd],
+     &     CHF_CONST_INT[ebj],
+     &     CHF_CONST_INT[varcomp],
+     &     CHF_BOX[region]
+     &     )
+
+      integer chf_ddecl[i; j; k]
+      real_t  q, na, eps, nvar
+      parameter (na = 6.02214179d23)
+      parameter (q = 1.602176487d-19)
+
+      CHF_MULTIDO[region; i; j; k]
+      nvar = x(CHF_IX[i;j;k],varcomp)
+      if ( j .lt. ebj) then
+         eps = epsd
+      else
+         eps = epsg
+      endif
+      dst(CHF_IX[i;j;k]) = dst(CHF_IX[i;j;k]) - q * coef(spec(varcomp)) * nvar * na / eps
+
+      CHF_ENDDO
+      return
+      end
+C     -----------------------------------------------------------
+C     Transport Coefficients
+C     -----------------------------------------------------------
+      subroutine print(chf_fra1[facemldata],
+     &     chf_const_int[facedir],
+     &     chf_box[facebox],
+     &     chf_const_int[flag])
+      integer chf_ddecl[i;j;k]
+
+      i=100;j=39
+      if(facedir == 1) then
+         chf_multido[facebox;i;j;k]
+         if(facedir == 1 .and. i==100.and. j==39)print*,"checkdata",
+     $        facemldata(chf_ix[i;j;k]),flag
+         chf_enddo
+      endif
+      return
+      end
+
+      subroutine transpcoef(
+     &     chf_fra1[facemdata],
+     &     chf_fra1[facemldata],
+     &     chf_fra1[faceddata],
+     &     chf_fra1[facedldata],
+     &     chf_const_fra[cellpdata],
+     &     chf_const_fra1[facegpdata],
+     &     chf_const_fra[celltdata],
+     &     chf_const_fra[cellndata],
+     &     chf_const_int[facedir],
+     &     chf_box[facebox],
+     &     chf_const_vr[coef],
+     &     chf_const_vi[spec],
+     &     chf_const_real[zsign],
+     &     chf_const_real[dx],
+     &     chf_const_real[press],
+     &     chf_const_real[nbg],
+     &     chf_const_real[mte],
+     &     chf_const_int[tcomp],
+     &     chf_const_int[ecomp],
+     &     chf_const_int[bgcomp],
+     &     chf_const_int[o2comp],
+     &     chf_const_int[cstbg],
+     &     chf_const_int[cstte],
+     &     chf_const_int[s])
+
+      integer chf_ddecl[i;j;k]
+      integer chf_ddecl[ioff;joff;koff]
+      integer m, elec
+      real_t kb, na, q, tfac, temax, ef, tf, ngf, ne, en, mob, arg, test, mvar, et, nuen
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na )
+      parameter (temax = 15.0*11604.5)
+
+      chf_dterm[
+      ioff = chf_id(0,facedir);
+      joff = chf_id(1,facedir);
+      koff = chf_id(2,facedir)]
+
+      chf_multido[facebox;i;j;k]
+
+      ef = - facegpdata(chf_ix[i;j;k]) 
+      !ef = -
+      !&     ( cellpdata(chf_ix[i     ;j     ;k     ], 0)
+      !&     - cellpdata(chf_ix[i-ioff;j-joff;k-koff], 0)
+      !&     )/dx
+
+      tf =
+     &     ( celltdata(chf_ix[i     ;j     ;k     ], tcomp)
+     &     + celltdata(chf_ix[i-ioff;j-joff;k-koff], tcomp)
+     &     )*half
+
+      ne =
+     &     ( cellndata(chf_ix[i     ;j     ;k     ], ecomp)
+     &     + cellndata(chf_ix[i-ioff;j-joff;k-koff], ecomp)
+     &     )*half
+
+      if (cstbg .eq. 0) then
+      		ngf =
+     &     ( cellndata(chf_ix[i     ;j     ;k     ], bgcomp)
+     &     + cellndata(chf_ix[i-ioff;j-joff;k-koff], bgcomp)
+     &     )*half
+      		!MDCancel for air
+      !&     + cellndata(chf_ix[i     ;j     ;k     ], o2comp)
+      !&     + cellndata(chf_ix[i-ioff;j-joff;k-koff], o2comp)
+      !&     )*half
+      else
+            ngf = nbg
+      endif
+
+      en = ABS(ef) / (ngf*na)
+      if (en .lt. 1.0d-21) then 
+          en = 1.0d-21
+      endif
+      if( coef(0) .eq. 1) then
+         if (cstte .eq. 0) then
+		     tf = min(max(tf * tfac /  ne,3d2),temax)  !MDCancel !lucacancel tf = min(max(tf * tfac /  ne,5d2),8d4)
+             !tf=5d4 !lucacancel!if(ne <= 1d-15) tf = min(tf,1d4)       !lucacancel
+         else
+             tf = mte
+         endif
+         
+         mvar = LOG(tf)
+         !MDCancel for Helium only			
+            !electron mobility
+            !Bolsig+		 	
+            !arg = coef(1);			 	
+            !do m=1, 8
+            !   arg = arg + coef(m+1)*mvar**m
+            !enddo
+            !mob = exp(arg)/(ngf*na)
+            !or (Roy POP06)
+            !nuen=1e12;
+            !mob = q/m_ppars.mass[m_species[m_eindex]]/nuen
+          !End Helium
+
+      else
+         mvar = LOG(en)
+         !MDCancel for Helium He+ ion mobility only
+         !if( coef(14) .eq. 0) then
+         !    et = abs(ef)*1e-2/press*133.332
+         !    if (et .le. 25e0) then
+         !        mob = 8.0e3*(1e0-8.0e-3*et)*1e-4/press
+         !    else
+         !        mob = 4.1e4/sqrt(et)*(1.0-27.44/et**1.5)*1e-4
+         !    endif
+         !endif
+         !end Helium
+      endif
+
+      if( coef(14) .eq. 0) then
+         arg = coef(1)			 	
+         do m = 1, 9
+            arg = arg + coef(m+1)*mvar**m
+         enddo
+         mob = EXP(arg)/(ngf*na)
+
+         facemdata(chf_ix[i;j;k]) = mob * ef * zsign
+         faceddata(chf_ix[i;j;k]) = mob * tf * coef(11)
+         if( coef(0) .eq. 1) then
+            facemldata(chf_ix[i;j;k]) = 5.0/3.0 * mob * ef * zsign
+            facedldata(chf_ix[i;j;k]) = - 5.0/3.0 * mob * tf * coef(11)
+         endif
+         
+      else 
+         faceddata(chf_ix[i;j;k]) = coef(11) * tf**coef(12) / (ngf*na)
+      endif
+
+      !if(j==14 .and. i==127) print'(i3,1p123e12.4)', i, j, tf, mvar, ef, mob, ngf
+      !if(j==13 .and. i==160) then 
+      !   print'(2i3,"transportCoefficientsF (160,13) tf, mvar, ef, mob, ngf",1p123e12.4)', tf, mvar, ef, mob, ngf
+      !   print*, i, j, tf, mvar, ef, mob, ngf
+      !endif
+
+      chf_enddo
+
+      return
+      end
+
+      subroutine maxDt(
+     &     chf_fra1[source],
+     &     chf_const_fra1[Tc],
+     &     chf_const_fra[Nc],
+     &     chf_const_real[epsg],
+     &     chf_box[cellBox],
+     &     chf_const_vr[coef],
+     &     chf_const_real[nbg],
+     &     chf_const_real[mte],
+     &     chf_const_int[eind],
+     &     chf_const_int[bgcomp],
+     &     chf_const_int[o2comp],
+     &     chf_const_int[cnbg],
+     &     chf_const_int[cte])
+
+      integer chf_ddecl[i;j;k]
+      integer m, idir
+      real_t kb, na, q, tfac, temax, tf, ngf, ne
+      real_t mob, arg, mvar
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na )
+      parameter (temax = 15.0*11604.5)
+
+! this should evaluate q*mue*ne*E^2
+! E = grad phi not -grad phi
+! doesnt really add, it simply sets
+
+      chf_multido[cellBox;i;j;k]      
+
+
+      ne = Nc(chf_ix[i;j;k], eind)
+      if (cte .eq. 0) then
+          tf = min(max(Tc(chf_ix[i;j;k]) * tfac / ne,3d2), temax) !MDcancel min(Tc(chf_ix[i;j;k]) * tfac / ne, 1e5) 
+      else 
+          tf = mte
+      endif
+
+      if (cnbg .eq. 0) then
+          ngf = Nc(chf_ix[i;j;k], bgcomp)  !MDCancel for air + Nc(chf_ix[i;j;k], o2comp)
+      else
+          ngf = nbg
+      endif
+      ne = Nc(chf_ix[i;j;k], eind)
+     
+      mvar = dlog(tf)      
+      arg = coef(1)			 	
+      do m = 1, 9
+         arg = arg + coef(m+1)*mvar**m
+      enddo      
+      mob = EXP(arg)/(ngf*na)
+      source(chf_ix[i;j;k]) = epsg/q/na/mob/ne
+
+      !!if(source(chf_ix[i;j;k]) < 1d0) print'("DT: ",1p123e12.4)',source(chf_ix[i;j;k]),epsg,q*na,mob,ne
+
+      chf_enddo
+
+      return
+      end
+
+C     -----------------------------------------------------------
+C     Joule Heating (electron, /nel)
+C     -----------------------------------------------------------
+      subroutine JOULEHEAT(
+     &     chf_fra1[source],
+     &     chf_const_fra[Ec],
+     &     chf_const_fra1[Tc],
+     &     chf_const_fra[Nc],
+     &     chf_const_fra[GNc],
+     &     chf_const_fra[Vel],
+     &     chf_box[cellBox],
+     &     chf_const_vr[coef],
+     &     chf_const_real[nbg],
+     &     chf_const_real[mte],
+     &     chf_const_int[eind],
+     &     chf_const_int[bgcomp],
+     &     chf_const_int[o2comp],
+     &     chf_const_int[cnbg],
+     &     chf_const_int[cte])
+
+      integer chf_ddecl[i;j;k]
+      integer chf_ddecl[ioff;joff;koff]
+      integer m, idir
+      real_t kb, na, q, tfac, temax, efsq, ef, tf, ngf, ne, en, gam
+      real_t mob, arg, mvar, tmp, efgn, Dterm, Mterm, Vterm, diff
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na )
+      parameter (temax = 15.0*11604.5)
+
+! this should evaluate q*mue*ne*E^2
+! E = grad phi not -grad phi
+! doesnt really add, it simply sets
+
+      chf_multido[cellBox;i;j;k]
+      
+      !if (cte .eq. 0) then
+      efsq=0d0
+      Vterm=0
+      do idir = 0, CH_SPACEDIM-1 
+         tmp = Ec(chf_ix[i;j;k],idir)
+         efsq = efsq+ tmp*tmp
+         Vterm=Vterm+tmp*Vel(CHF_IX[i;j;k], idir)
+      enddo
+      Vterm = Vterm*q*na
+
+      efgn=0d0
+      do idir = 0, CH_SPACEDIM-1 
+         efgn = efgn+ Ec(chf_ix[i;j;k],idir)*GNc(chf_ix[i;j;k],idir)
+      enddo
+
+      ne = Nc(chf_ix[i;j;k], eind)
+      if (cte .eq. 0) then
+          tf = min(max(Tc(chf_ix[i;j;k]) * tfac / ne,3d2), temax) !MDcancel min(Tc(chf_ix[i;j;k]) * tfac / ne, 1e5) 
+      else 
+          tf = mte
+      endif
+
+      if (cnbg .eq. 0) then
+          ngf = Nc(chf_ix[i;j;k], bgcomp)  !MDCancel for air + Nc(chf_ix[i;j;k], o2comp)
+      else
+          ngf = nbg
+      endif
+     
+      mvar = dlog(tf)      
+      arg = coef(1)			 	
+      do m = 1, 9
+         arg = arg + coef(m+1)*mvar**m
+      enddo      
+      mob = EXP(arg)/(ngf*na)
+
+      diff = mob*tf*coef(11)
+      Dterm = -diff*efgn*q*na  
+      Mterm = mob*efsq*q*na
+      source(chf_ix[i;j;k]) = source(chf_ix[i;j;k]) + Vterm + Mterm + Dterm/ne !note divided by ne because multiplied by nel in cvode_f
+
+      !if(j==13 .and. i==160) then 
+      !   print'(2i3,"electronJouleF (160,13) mob, diff, tf, ngf, ne, efsq, Mterm, Dterm/ne, source",1p123e12.4)', mob, diff, tf, ngf, ne, efsq, Mterm, Dterm/ne, source(chf_ix[i;j;k])
+      !   print*, i, j, mob, diff, tf, ngf, ne, efsq, Mterm, Dterm/ne, source(chf_ix[i;j;k])
+      !endif
+
+      !endif ! on cte
+
+      chf_enddo
+
+      return
+      end
+
+C     -----------------------------------------------------------
+C     Joule Heating (fluid, total)
+C     -----------------------------------------------------------
+      subroutine JOULEHEATFLUID(
+     &     chf_fra1[source],
+     &     chf_const_fra[Ec],
+     &     chf_const_fra1[Tc],
+     &     chf_const_fra[Nc],
+     &     chf_const_fra[GNc],
+     &     chf_box[cellBox],
+     &     chf_const_vr[coef],
+     &     chf_const_int[ecomp],
+     &     chf_const_int[bgcomp],
+     &     chf_const_int[o2comp],
+     &     chf_const_int[cnbg],
+     &     chf_const_int[cte],
+     &     chf_const_int[s],
+     &     chf_const_real[zsign],
+     &     chf_const_real[nbg],
+     &     chf_const_real[mte],
+     &     chf_const_real[etaT])
+
+      integer chf_ddecl[i;j;k]
+      integer chf_ddecl[ioff;joff;koff]
+      integer m, idir
+      real_t kb, na, q, tfac, temax, efsq, ef, tf, ngf, ne, nk
+      real_t mob, arg, mvar, tmp, efgn, Dterm, Mterm, diff,en
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na )
+      parameter (temax = 15.0*11604.5)
+
+! this should evaluate q*mue*ne*E^2
+! E = grad phi, not -grad phi
+! doesnt really add, it simply sets
+
+      chf_multido[cellBox;i;j;k]
+
+      efsq=0d0
+      do idir = 0, CH_SPACEDIM-1 
+         tmp = Ec(chf_ix[i;j;k],idir)
+         efsq = efsq+ tmp*tmp
+      enddo
+      ef = sqrt(efsq);
+
+      efgn=0d0
+      do idir = 0, CH_SPACEDIM-1 
+         efgn = efgn+ Ec(chf_ix[i;j;k],idir)*GNc(chf_ix[i;j;k],idir + s*CH_SPACEDIM)
+      enddo
+
+      nk = Nc(chf_ix[i;j;k], s)
+      ne = Nc(chf_ix[i;j;k], ecomp)
+      tf = Tc(chf_ix[i;j;k])
+      if (cnbg .eq. 0) then
+          ngf = Nc(chf_ix[i;j;k], bgcomp)  !MDCancel for air + Nc(chf_ix[i;j;k], o2comp)
+      else
+          ngf = nbg
+      endif
+
+      en = ABS(ef) / (ngf*na)
+      if (en .lt. 1.0d-21) then 
+          en = 1.0d-21
+      endif
+      if( coef(0) .eq. 1) then
+         if (cte .eq. 0) then
+             tf = min(max(tf * tfac /  ne,3d2),temax)  !lucacancel tf = min(max(tf * tfac /  ne,3d2),1d5) 
+         else 
+             tf = mte
+         endif 
+         mvar = LOG(tf)
+      else
+         mvar = LOG(en)
+      endif
+
+      if( coef(14) .eq. 0) then
+         arg = coef(1)			 	
+         do m = 1, 9
+            arg = arg + coef(m+1)*mvar**m
+         enddo
+
+         mob = EXP(arg)/(ngf*na) 
+         diff = mob*tf*coef(11)
+         Dterm = diff*efgn*q*na*zsign  
+         Mterm = mob*efsq*q*nk*na
+         source(chf_ix[i;j;k]) = source(chf_ix[i;j;k]) + etaT*(Mterm + Dterm)
+
+         !if(j==13 .and. i==160) then 
+         !print'(2i3,"fluidJouleF (160,13) mob, diff, tf, ngf, ne, efsq, Mterm, Dterm, source",1p123e12.4)', mob, diff, tf, ngf, ne, efsq, Mterm, Dterm, source(chf_ix[i;j;k])
+         !print*, i, j, mob, diff, tf, ngf, ne, efsq, Mterm, Dterm, source(chf_ix[i;j;k])
+         !endif
+
+      endif
+
+      chf_enddo
+
+      return
+      end
+
+C     -----------------------------------------------------------
+C     Electron Temperature
+C     -----------------------------------------------------------
+      subroutine ELECTEMP(
+     &     chf_fra1[Tele],
+     &     chf_const_fra1[eden],
+     &     chf_const_fra1[enrg],
+     &     chf_const_real[mte],
+     &     chf_const_int[cte],
+     &     chf_box[cellBox])
+
+      integer chf_ddecl[i;j;k]
+      integer m, idir
+      real_t kb, q, tfac, temax, efsq, tf, ngf, ne
+      real_t mob, arg, mvar, tmp
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (tfac = 2.0d0/3.0d0/kb )
+      parameter (temax = 15.0*11604.5)
+
+      chf_multido[cellBox;i;j;k]
+
+      if (cte .eq. 0) then
+           Tele(chf_ix[i;j;k]) = min(max(enrg(chf_ix[i;j;k]) * tfac / eden(chf_ix[i;j;k]),3d2),temax)  !MDCancel
+      else 
+           Tele(chf_ix[i;j;k]) = mte
+      endif
+
+      !if(j==13 .and. i==160) then 
+      !print'(2i3,"elecTempF (160,13) Tele",1p123e12.4)', Tele(chf_ix[i;j;k])
+      !print*, i, j, Tele(chf_ix[i;j;k])
+      !endif
+
+      chf_enddo
+
+      return
+      end
+
+C     -----------------------------------------------------------
+C     Mask routine
+C     -----------------------------------------------------------
+      subroutine MASK(
+     &     chf_fra1[DMask],
+     &     CHF_FRA[src],
+     &     chf_const_fra1[eden],
+     &     chf_const_fra1[enrg],
+     &     chf_box[cellBox])
+
+      integer chf_ddecl[i;j;k]
+      integer m, idir
+      real_t kb, na, q, tfac, efsq, tf, ngf, ne
+      real_t mob, arg, mvar, tmp
+
+      parameter (q = 1.602176487d-19)
+      parameter (kb = 1.3806504d-23)
+      parameter (na = 6.02214179d23)
+      parameter (tfac = 2.0d0/3.0d0/kb/na )
+
+      chf_multido[cellBox;i;j;k]
+
+      tmp = enrg(chf_ix[i;j;k]) * tfac /  eden(chf_ix[i;j;k])
+      if(tmp > 0d2) then  !lucacancel (tagall)
+         DMask(chf_ix[i;j;k]) = 1d0
+         src(chf_ix[i;j;k],:)=0d0
+      else
+         DMask(chf_ix[i;j;k]) = -1d0
+      endif
+
+      chf_enddo
+
+      return
+      end

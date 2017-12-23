@@ -1,0 +1,450 @@
+C      _______              __
+C     / ___/ /  ___  __ _  / /  ___
+C    / /__/ _ \/ _ \/  V \/ _ \/ _ \
+C    \___/_//_/\___/_/_/_/_.__/\___/
+C    Please refer to Copyright.txt, in Chombo's root directory.
+
+
+#include "CONSTANTS.H"
+
+!!@@Spec@@!!  species flux stuff
+      subroutine speciesfluxgsrb(
+     &     chf_fra1[phi],
+     &     chf_const_fra1[rhs],
+     &     chf_const_fra1[relcoef],
+     &     chf_const_fra1[acoef],
+     &     chf_const_fra1[b0],
+     &     chf_const_fra1[b1],
+     &     chf_const_fra1[b2],
+     &     chf_const_fra1[W0],
+     &     chf_const_fra1[W1],
+     &     chf_const_fra1[W2],
+     &     chf_const_real[alpha],
+     &     chf_const_real[beta],
+     &     chf_const_real[dx],
+     &     chf_box[region],
+     $     chf_const_int[redBlack])
+
+      integer chf_ddecl[i;j;k],chf_ddecl[ip;jp;kp], chf_ddecl[im;jm;km]
+      real_t laplphi, dx0
+      integer imin,imax,indtot
+
+      
+      dx0 = beta/(dx * dx)
+
+#if CH_SPACEDIM==3
+      do k=CHF_LBOUND[region; 2], CHF_UBOUND[region; 2]
+#endif
+#if CH_SPACEDIM > 1
+         do j=CHF_LBOUND[region; 1], CHF_UBOUND[region; 1]
+#endif
+            imin = CHF_LBOUND[region; 0]
+            CHF_DTERM[indtot = imin; + j ; + k ]
+
+            imin = imin + abs(mod(indtot + redBlack, 2))
+            imax = CHF_UBOUND[region; 0]
+            do i = imin, imax, 2
+c     this makes lphi = beta*div(b grad phi)
+
+              
+
+               laplphi = CHF_DTERM[
+     &              (b0(CHF_IX[i+1;j  ;k  ])*phi(chf_ix[i+1;j  ;k  ]) - W0(CHF_IX[i+1;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ])
+     &              - b0(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W0(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i-1;j  ;k  ]))*dx0;
+     &              +(b1(CHF_IX[i  ;j+1;k  ])*phi(chf_ix[i  ;j+1;k  ]) - W1(CHF_IX[i  ;j+1;k  ])*phi(chf_ix[i  ;j  ;k  ])
+     &              - b1(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W1(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j-1;k  ]))*dx0;
+     &              +(b2(CHF_IX[i  ;j  ;k+1])*phi(chf_ix[i  ;j  ;k+1]) - W2(CHF_IX[i  ;j  ;k+1])*phi(chf_ix[i  ;j  ;k  ])
+     &              - b2(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W2(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k-1]))*dx0]
+
+
+c     we want lphi = alpha * acoef * phi  + beta*div(b grad phi)
+               laplphi = laplphi + alpha * acoef(chf_ix[i;j;k]) * phi(chf_ix[i;j;k])
+
+c     subtract off residual weighted by relaxation coefficient
+               phi(chf_ix[i;j;k]) = phi(chf_ix[i;j;k]) + relcoef(chf_ix[i;j;k])*(rhs(chf_ix[i;j;k]) - laplphi)
+
+            enddo
+#if CH_SPACEDIM > 1
+         enddo
+#endif
+#if CH_SPACEDIM==3
+      enddo
+#endif
+
+      return
+      end
+!!@@Spec@@!!  species flux stuff
+        subroutine ebsforegapplydomainflux(
+     &    chf_fra1[phi],
+     &    chf_const_fra1[faceflux],
+     &     chf_const_fra1[bc],
+     &     chf_const_fra1[Wc],
+     &     chf_const_real[dx],
+     &     chf_const_int[side],
+     &     chf_const_int[idir],
+     &     chf_box[box])
+
+        integer chf_ddecl[i;j;k], chf_ddecl[ioff;joff;koff]
+        real_t scaledflux, tol,scaledcoef
+c       set a tolerance to account for an extremely small thermal conductivity.
+c       specially for some test cases with a thermal conductivity set to zero
+
+        tol = 1.0d-15
+        chf_dterm[ioff = chf_id(0,idir);
+        joff = chf_id(1,idir);
+        koff = chf_id(2,idir)]
+
+        !side=-1 for Lo, +1 for Hi
+
+c     strangely the faceflux lives on the first interior cell not on the face.
+c     so no whacky face-to-cell shifting here
+c     also need to divide out variable coefficient bit because it gets multiplied back in later
+c     bc has also been shifted
+        chf_multido[box;i;j;k]
+
+        if (side.eq.1) then
+           if (ABS(bc(chf_ix[i-ioff;j-joff;k-koff])) .GT. tol) then
+              scaledflux = faceflux(chf_ix[i-ioff;j-joff;k-koff])/bc(chf_ix[i-ioff;j-joff;k-koff])
+              scaledcoef = Wc(chf_ix[i-ioff;j-joff;k-koff])/bc(chf_ix[i-ioff;j-joff;k-koff])
+              phi(chf_ix[i;j;k]) = scaledcoef*phi(chf_ix[i-ioff;j-joff;k-koff]) + scaledflux*dx
+           else
+              phi(chf_ix[i;j;k]) = phi(chf_ix[i-ioff;j-joff;k-koff])
+           endif
+        else
+           if(ABS(Wc(chf_ix[i+ioff;j+joff;k+koff])) .GT. tol) then
+              scaledflux = faceflux(chf_ix[i+ioff;j+joff;k+koff])/Wc(chf_ix[i+ioff;j+joff;k+koff])
+              scaledcoef = bc(chf_ix[i+ioff;j+joff;k+koff])/Wc(chf_ix[i+ioff;j+joff;k+koff])
+              phi(chf_ix[i;j;k]) = scaledcoef*phi(chf_ix[i+ioff;j+joff;k+koff]) - scaledflux*dx
+           else
+              phi(chf_ix[i;j;k]) = phi(chf_ix[i+ioff;j+joff;k+koff])
+           endif
+
+        endif
+
+        chf_enddo
+
+        return
+        end
+
+!!@@Spec@@!!  species flux stuff
+      subroutine speciesfluxinplace(
+     &     chf_fra1[opphidir],
+     &     chf_const_fra1[phi],
+     &     chf_const_fra1[b0],
+     &     chf_const_fra1[b1],
+     &     chf_const_fra1[b2],
+     &     chf_const_fra1[W0],
+     &     chf_const_fra1[W1],
+     &     chf_const_fra1[W2],
+     &     chf_const_real[beta],
+     &     chf_const_real[dx],
+     &     chf_box[box])
+
+      integer chf_ddecl[i;j;k],chf_ddecl[ip;jp;kp], chf_ddecl[im;jm;km]
+      real_t laplphi, dx0
+
+      dx0 = beta/(dx * dx)
+
+      chf_multido[box;i;j;k]
+
+
+      laplphi = CHF_DTERM[
+     &      (b0(CHF_IX[i+1;j  ;k  ])*phi(chf_ix[i+1;j  ;k  ]) - W0(CHF_IX[i+1;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ])
+     &     - b0(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W0(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i-1;j  ;k  ]))*dx0;
+     &     +(b1(CHF_IX[i  ;j+1;k  ])*phi(chf_ix[i  ;j+1;k  ]) - W1(CHF_IX[i  ;j+1;k  ])*phi(chf_ix[i  ;j  ;k  ])
+     &     - b1(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W1(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j-1;k  ]))*dx0;
+     &     +(b2(CHF_IX[i  ;j  ;k+1])*phi(chf_ix[i  ;j  ;k+1]) - W2(CHF_IX[i  ;j  ;k+1])*phi(chf_ix[i  ;j  ;k  ])
+     &     - b2(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k  ]) + W2(CHF_IX[i  ;j  ;k  ])*phi(chf_ix[i  ;j  ;k-1]))*dx0]
+
+c     opphidir comes in holding alpha*phi
+      opphidir(chf_ix[i;j;k]) = opphidir(chf_ix[i;j;k]) + laplphi
+      if(.not. abs(laplphi) < 1d299) then
+         print'(2i3,"NAN Laplacian",1p123e12.4)',i,j, laplphi,b0(CHF_IX[i+1;j  ;k  ]),phi(chf_ix[i+1;j  ;k  ]) , phi(chf_ix[i  ;j  ;k  ]),
+     &        b0(CHF_IX[i  ;j  ;k  ]),phi(chf_ix[i  ;j  ;k  ]), phi(chf_ix[i-1;j  ;k  ]),
+     &        W0(CHF_IX[i+1;j  ;k  ]),
+     &        W0(CHF_IX[i  ;j  ;k  ]),
+     &        b1(CHF_IX[i  ;j+1;k  ]),phi(chf_ix[i  ;j+1;k  ]), phi(chf_ix[i  ;j  ;k  ]),
+     &        b1(CHF_IX[i  ;j  ;k  ]),phi(chf_ix[i  ;j  ;k  ]), phi(chf_ix[i  ;j-1;k  ]),
+     &        W1(CHF_IX[i  ;j+1;k  ]),
+     &        W1(CHF_IX[i  ;j  ;k  ])
+         print*,ip,jp,phi(chf_ix[i  ;j+1;k  ])
+         stop
+      endif
+
+      chf_enddo
+
+      return
+      end
+      subroutine incrapplyebsfo(
+     $     chf_fra1[lhs],
+     $     chf_const_fra1[interiorflux],
+     $     chf_const_fra1[domainfluxlo],
+     $     chf_const_fra1[domainfluxhi],
+     $     chf_const_real[beta],
+     $     chf_const_real[dx],
+     $     chf_box[lobox],
+     $     chf_box[hibox],
+     $     chf_box[centerbox],
+     $     chf_const_int[haslo],
+     $     chf_const_int[hashi],
+     $     chf_const_int[facedir])
+
+      integer chf_ddecl[ii,i;jj,j;kk,k]
+
+
+      chf_dterm[
+      ii = chf_id(facedir, 0);
+      jj = chf_id(facedir, 1);
+      kk = chf_id(facedir, 2)]
+
+      chf_multido[centerbox; i; j; k]
+
+      lhs(chf_ix[i;j;k]) = lhs(chf_ix[i;j;k])
+     $     +beta*
+     $     (interiorflux(chf_ix[i+ii;j+jj;k+kk])
+     $     -interiorflux(chf_ix[i   ;j   ;k   ]))/dx
+
+      chf_enddo
+
+
+      if(haslo .eq. 1) then
+         chf_multido[lobox; i; j; k]
+
+         lhs(chf_ix[i;j;k]) = lhs(chf_ix[i;j;k])
+     $        + beta*
+     $        (interiorflux(chf_ix[i+ii;j+jj;k+kk])
+     $        -domainfluxlo(chf_ix[i   ;j   ;k   ]))/dx
+
+         chf_enddo
+      endif
+
+      if(hashi .eq. 1) then
+         chf_multido[hibox; i; j; k]
+
+         lhs(chf_ix[i;j;k]) = lhs(chf_ix[i;j;k])
+     $        + beta*
+     $        (domainfluxhi(chf_ix[i+ii;j+jj;k+kk])
+     $        -interiorflux(chf_ix[i   ;j   ;k   ]))/dx
+
+         chf_enddo
+      endif
+
+
+      return
+      end
+
+      subroutine decrinvrelcoefebsfo(
+     &     chf_fra1[relcoef],
+     &     chf_fra1[Dk],
+     &     chf_fra1[VW],
+     &     chf_const_real[beta],
+     &     chf_box[box],
+     $     chf_real[dx],
+     $     chf_int[idir])
+
+      integer chf_ddecl[i;j;k]
+      integer chf_ddecl[ii;jj;kk]
+
+      chf_dterm[
+      ii = chf_id(idir, 0);
+      jj = chf_id(idir, 1);
+      kk = chf_id(idir, 2)]
+
+      chf_multido[box;i;j;k]
+
+      relcoef(chf_ix[i;j;k]) = relcoef(chf_ix[i;j;k])
+     $     - beta*(
+     $     VW(chf_ix[i+ii;j+jj;k+kk]) +
+     $     Dk(chf_ix[i   ;j   ;k   ]))/(dx*dx)
+
+      chf_enddo
+
+      return
+      end
+
+!!@@Spec@@!!  species flux stuff
+      subroutine getfluxebsfo(
+     &     chf_fra1[flux],
+     $     chf_const_fra1[bcoef],
+     $     chf_const_fra1[Wcoef],
+     &     chf_const_fra1[phi],
+     &     chf_box[opphibox],
+     $     chf_const_real[dx],
+     $     chf_const_real[beta],
+     $     chf_const_int[idir])
+
+      integer chf_ddecl[i;j;k]
+      integer chf_ddecl[ioff;joff;koff]
+
+      real_t f1term,f2term
+
+      chf_dterm[
+      ioff = chf_id(0,idir);
+      joff = chf_id(1,idir);
+      koff = chf_id(2,idir)]
+
+
+      chf_multido[opphibox;i;j;k]
+
+      f1term = bcoef(chf_ix[i;j;k])/dx
+      f2term = Wcoef(chf_ix[i;j;k])/dx
+      flux(chf_ix[i;j;k]) =
+     $     f1term*phi(chf_ix[i     ;j     ;k     ]) -
+     $     f2term*phi(chf_ix[i-ioff;j-joff;k-koff])
+
+
+      if(.not. abs(flux(chf_ix[i;j;k])) < 1d299)
+     $     print'(3i3," NAN getfluxebsfo",1p123e12.4)',i,j,idir, f1term,
+     $     f2term,phi(chf_ix[i-ioff;j-joff;k-koff]),phi(chf_ix[i;j;k])
+
+      chf_enddo
+
+      return
+      end
+
+      subroutine gsrbebsfo(
+     &     chf_fra1[phi],
+     &     chf_const_fra1[lph],
+     &     chf_const_fra1[rhs],
+     &     chf_const_fra1[lam],
+     &     chf_box[coloredbox])
+
+      integer chf_ddecl[i;j;k]
+      REAL_T phio, lamo, rhso, lpho
+
+      chf_multido[coloredbox;i;j;k;2]
+
+         phio  = phi(chf_ix[i;j;k])
+         lamo  = lam(chf_ix[i;j;k])
+         rhso  = rhs(chf_ix[i;j;k])
+         lpho  = lph(chf_ix[i;j;k])
+
+         phi(chf_ix[i;j;k]) =
+     $        phi(chf_ix[i;j;k]) +
+     $        lam(chf_ix[i;j;k])*(
+     $        rhs(chf_ix[i;j;k]) -
+     $        lph(chf_ix[i;j;k]))
+
+       chf_enddo
+
+      return
+      end
+
+      subroutine incravefacetocell(
+     &     chf_fra1[cellgrad],
+     &     chf_const_fra1[facegrad],
+     &     chf_const_int[facedir],
+     &     chf_box[cellbox])
+
+      integer chf_ddecl[i; j; k]
+      integer chf_ddecl[ioff; joff; koff]
+
+      chf_dterm[
+      ioff = chf_id(0,facedir);
+      joff = chf_id(1,facedir);
+      koff = chf_id(2,facedir)]
+
+      chf_multido[cellbox;i;j;k]
+
+      cellgrad(chf_ix[i;j;k]) = cellgrad(chf_ix[i;j;k])+
+     &     (facegrad(chf_ix[i+ioff;j+joff;k+koff])
+     &     +facegrad(chf_ix[i     ;j     ;k     ]))*half
+       if(.not. abs(cellgrad(chf_ix[i;j;k])) < 1d299)
+     $     print'(2i3,1p123e12.4)',i,j,cellgrad(chf_ix[i;j;k])
+
+      chf_enddo
+
+      return
+      end
+
+!finite difference version of SharfetterGummel coeffs (same as in EBAMRSPeciesF.ChF but only for one species)
+      subroutine SG1FD(
+     &     CHF_FRA1[MobData],
+     &     CHF_FRA1[DiffData],
+     &     CHF_CONST_FRA1[AMobData],
+     &     CHF_CONST_FRA1[ADiffData],
+     &     CHF_BOX[region],
+     &     chf_const_real[dx]
+     &     )
+
+      integer CHF_DDECL[i;j;k]
+      real_t z,capD,capM,zexp,f1
+      
+      CHF_MULTIDO[region; i; j; k]
+      
+      capD = ADiffData(CHF_IX[i;j;k])
+      capM = AMobData (CHF_IX[i;j;k])*dx
+      if(.not. abs(capD) < 1d100) capD=1d0;
+      if(.not. abs(capM) < 1d100) capM=0d0;
+      
+      if(capM <= 0d0) then
+         DiffData(CHF_IX[i;j;k]) = capD - capM
+         MobData(CHF_IX[i;j;k]) = capD
+      endif
+      if(capM > 0d0) then
+         DiffData(CHF_IX[i;j;k]) = capD
+         MobData(CHF_IX[i;j;k]) = capD+ capM
+      endif
+      
+      
+      chf_enddo
+      
+      return
+      end
+
+      subroutine SG1(
+     &     CHF_FRA1[MobData],
+     &     CHF_FRA1[DiffData],
+     &     CHF_CONST_FRA1[AMobData],
+     &     CHF_CONST_FRA1[ADiffData],
+     &     CHF_BOX[region],
+     &     chf_const_real[dx]
+     &     )
+
+      integer CHF_DDECL[i;j;k]
+      real_t z,capD,capM,zexp,f1
+
+      CHF_MULTIDO[region; i; j; k]
+      
+      capD = ADiffData(CHF_IX[i;j;k])
+      capM = AMobData (CHF_IX[i;j;k])*dx
+      if(.not. abs(capD) < 1d299) capD=1d0;
+      if(.not. abs(capM) < 1d100) capM=0d0;
+      
+      if(capD > 1d-13) then
+         z = capM/capD
+         zexp = exp(z)
+         if(.not.zexp < 1d50) then
+!capM must be >0
+            DiffData(CHF_IX[i;j;k]) = 0d0
+            MobData(CHF_IX[i;j;k]) = capM
+         endif
+         if(zexp < 1d50) then
+            f1=1d0
+            if(abs(zexp-1d0) > 1d-14)f1=z/(zexp-1d0)
+            DiffData(CHF_IX[i;j;k]) = capD*f1
+            MobData(CHF_IX[i;j;k]) = capD*f1*zexp
+         endif
+      endif
+      if( capD <= 1d-13 ) then
+         if(capM <= 0d0) then
+            DiffData(CHF_IX[i;j;k]) = capD - capM
+            MobData(CHF_IX[i;j;k]) = capD
+         endif
+         if(capM > 0d0) then
+            DiffData(CHF_IX[i;j;k]) = capD
+            MobData(CHF_IX[i;j;k]) = capD+ capM
+         endif
+      endif
+
+      if(.not. abs(MobData(chf_ix[i;j;k])) < 1d299) then
+         print'(2i3," NAN SHARFETTERGUMMEL",1p123e12.4)',i,j,
+     $        capD,capM,z,zexp, DiffData(CHF_IX[i;j;k]),MobData(CHF_IX[i;j;k])
+         stop 'NAN in SG1'
+      endif
+      
+      chf_enddo
+      
+      return
+      end
+      
